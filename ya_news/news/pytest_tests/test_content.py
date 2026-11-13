@@ -1,40 +1,27 @@
 """Тесты содержимого страниц YaNews."""
 
-from datetime import date
-
 import pytest
 
 from news.forms import CommentForm
-from news.models import News
+
+from .conftest import NEWS_ON_PAGE
 
 pytestmark = pytest.mark.django_db
 
-NEWS_LIMIT = 10
-
 
 def test_home_page_news_limit(client, home_url, many_news):
-    """На главной не больше 10 новостей."""
+    """На главной не больше лимита новостей."""
     response = client.get(home_url)
 
-    assert len(response.context['object_list']) == NEWS_LIMIT
+    assert response.context['object_list'].count() == NEWS_ON_PAGE
 
 
-def test_home_page_news_ordered_newest_first(client, home_url):
+def test_home_page_news_ordered_newest_first(client, home_url, many_news):
     """Новости на главной — от самой свежей к самой старой."""
-    old = News.objects.create(
-        title='Старая', text='...', date=date(2024, 1, 1),
-    )
-    mid = News.objects.create(
-        title='Средняя', text='...', date=date(2024, 6, 1),
-    )
-    new = News.objects.create(
-        title='Новая', text='...', date=date(2024, 12, 1),
-    )
-
     response = client.get(home_url)
 
     dates = [item.date for item in response.context['object_list']]
-    assert dates == [new.date, mid.date, old.date]
+    assert dates == sorted(dates, reverse=True)
 
 
 def test_detail_page_comments_ordered_oldest_first(
@@ -54,7 +41,8 @@ def test_detail_page_has_form_for_authenticated(
     """Авторизованный пользователь получает форму комментария."""
     response = author_client.get(news_detail_url)
 
-    assert isinstance(response.context.get('form'), CommentForm)
+    assert 'form' in response.context
+    assert isinstance(response.context['form'], CommentForm)
 
 
 def test_detail_page_has_no_form_for_anonymous(

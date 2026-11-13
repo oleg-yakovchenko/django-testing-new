@@ -1,6 +1,6 @@
 """Общие фикстуры для тестов YaNews."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -11,6 +11,9 @@ from django.utils import timezone
 from news.models import Comment, News
 
 User = get_user_model()
+
+NEWS_ON_PAGE = 10
+COMMENTS_COUNT = 3
 
 
 @pytest.fixture
@@ -63,29 +66,31 @@ def comment(db, news, author):
 
 @pytest.fixture
 def many_news(db):
-    """11 новостей — для проверки лимита в 10 на главной."""
-    return News.objects.bulk_create([
-        News(title=f'Новость {i}', text=f'Текст {i}') for i in range(11)
-    ])
+    """Новостей на одну больше лимита на главной."""
+    News.objects.bulk_create(
+        News(
+            title=f'Новость {i}',
+            text=f'Текст {i}',
+            date=date(2024, 1, 1) + timedelta(days=i),
+        )
+        for i in range(NEWS_ON_PAGE + 1)
+    )
 
 
 @pytest.fixture
 def comments_with_different_dates(db, news, author):
-    """Три комментария с разным временем создания."""
+    """Комментарии с разным временем создания."""
     comments = [
         Comment.objects.create(
             news=news, author=author, text=f'Комментарий {i}'
         )
-        for i in range(3)
+        for i in range(COMMENTS_COUNT)
     ]
     now = timezone.now()
     for i, item in enumerate(comments):
         Comment.objects.filter(pk=item.pk).update(
             created=now + timedelta(minutes=i)
         )
-    for item in comments:
-        item.refresh_from_db()
-    return comments
 
 
 @pytest.fixture
@@ -110,3 +115,39 @@ def edit_comment_url(comment):
 def delete_comment_url(comment):
     """Адрес удаления комментария."""
     return reverse('news:delete', args=(comment.pk,))
+
+
+@pytest.fixture
+def news_detail_url_with_anchor(news):
+    """Адрес страницы новости с якорем #comments."""
+    return reverse('news:detail', args=(news.pk,)) + '#comments'
+
+
+@pytest.fixture
+def login_url():
+    """Адрес страницы входа."""
+    return reverse('users:login')
+
+
+@pytest.fixture
+def signup_url():
+    """Адрес страницы регистрации."""
+    return reverse('users:signup')
+
+
+@pytest.fixture
+def logout_url():
+    """Адрес страницы выхода."""
+    return reverse('users:logout')
+
+
+@pytest.fixture
+def reverse_url(request):
+    """URL по имени фикстуры из параметризации."""
+    return request.getfixturevalue(request.param)
+
+
+@pytest.fixture
+def parametrized_client(request):
+    """Клиент по имени фикстуры из параметризации."""
+    return request.getfixturevalue(request.param)

@@ -3,7 +3,6 @@
 from http import HTTPStatus
 
 import pytest
-from django.urls import reverse
 
 from news.models import Comment
 
@@ -11,7 +10,6 @@ pytestmark = pytest.mark.django_db
 
 BAD_WORD = 'редиска'
 MODERATION_ERROR = 'Не ругайтесь!'
-COMMENTS_ANCHOR = '#comments'
 
 
 def test_anonymous_cannot_create_comment(client, news_detail_url):
@@ -28,14 +26,14 @@ def test_authenticated_user_creates_exactly_one_comment(
     author_client, author, news, news_detail_url,
 ):
     """Авторизованный создаёт ровно один комментарий с нужными полями."""
-    count_before = Comment.objects.count()
+    Comment.objects.all().delete()
 
     response = author_client.post(
         news_detail_url, {'text': 'Новый комментарий'},
     )
 
     assert response.status_code == HTTPStatus.FOUND
-    assert Comment.objects.count() == count_before + 1
+    assert Comment.objects.count() == 1
     comment = Comment.objects.get()
     assert comment.text == 'Новый комментарий'
     assert comment.author == author
@@ -43,16 +41,14 @@ def test_authenticated_user_creates_exactly_one_comment(
 
 
 def test_create_redirects_to_news_comments_anchor(
-    author_client, news, news_detail_url,
+    author_client, news_detail_url, news_detail_url_with_anchor,
 ):
     """После успешного создания — редирект к якорю #comments."""
-    expected = reverse('news:detail', args=(news.pk,)) + COMMENTS_ANCHOR
-
     response = author_client.post(
         news_detail_url, {'text': 'Новый'},
     )
 
-    assert response.url == expected
+    assert response.url == news_detail_url_with_anchor
 
 
 @pytest.mark.parametrize(
@@ -82,71 +78,66 @@ def test_author_edits_comment_preserving_author_and_news(
     author_client, comment, edit_comment_url,
 ):
     """Автор меняет текст, не меняя автора и новость."""
-    original_author_id = comment.author_id
-    original_news_id = comment.news_id
     new_text = 'Изменённый текст'
 
     response = author_client.post(edit_comment_url, {'text': new_text})
 
     assert response.status_code == HTTPStatus.FOUND
-    comment.refresh_from_db()
-    assert comment.text == new_text
-    assert comment.author_id == original_author_id
-    assert comment.news_id == original_news_id
+    updated = Comment.objects.get(pk=comment.pk)
+    assert updated.text == new_text
+    assert updated.author_id == comment.author_id
+    assert updated.news_id == comment.news_id
 
 
 def test_edit_redirects_to_news_comments_anchor(
-    author_client, comment, edit_comment_url,
+    author_client, edit_comment_url, news_detail_url_with_anchor,
 ):
     """После успешного редактирования — редирект к #comments."""
-    expected = (
-        reverse('news:detail', args=(comment.news.pk,)) + COMMENTS_ANCHOR
+    response = author_client.post(
+        edit_comment_url, {'text': 'Новый текст'},
     )
 
-    response = author_client.post(edit_comment_url, {'text': 'Новый текст'})
-
-    assert response.url == expected
+    assert response.url == news_detail_url_with_anchor
 
 
 def test_author_can_delete_own_comment(
     author_client, comment, delete_comment_url,
 ):
     """Автор удаляет свой комментарий."""
+    count_before = Comment.objects.count()
+
     response = author_client.post(delete_comment_url)
 
     assert response.status_code == HTTPStatus.FOUND
     assert not Comment.objects.filter(pk=comment.pk).exists()
+    assert Comment.objects.count() == count_before - 1
 
 
 def test_delete_redirects_to_news_comments_anchor(
-    author_client, comment, delete_comment_url,
+    author_client, delete_comment_url, news_detail_url_with_anchor,
 ):
     """После успешного удаления — редирект к #comments."""
-    expected = (
-        reverse('news:detail', args=(comment.news.pk,)) + COMMENTS_ANCHOR
-    )
-
     response = author_client.post(delete_comment_url)
 
-    assert response.url == expected
+    assert response.url == news_detail_url_with_anchor
 
 
-@pytest.mark.parametrize('action_name', ['news:edit', 'news:delete'])
+@pytest.mark.parametrize(
+    'reverse_url',
+    ['edit_comment_url', 'delete_comment_url'],
+    indirect=['reverse_url'],
+)
 def test_non_author_gets_404_and_data_unchanged(
-    reader_client, comment, action_name,
+    reader_client, comment, reverse_url,
 ):
     """Чужой получает 404, данные в БД не меняются."""
-    original = {
-        'text': comment.text,
-        'author_id': comment.author_id,
-        'news_id': comment.news_id,
-    }
-    url = reverse(action_name, args=(comment.pk,))
+    count_before = Comment.objects.count()
 
-    response = reader_client.post(url, {'text': 'Взлом'})
+    response = reader_client.post(reverse_url, {'text': 'Взлом'})
 
     assert response.status_code == HTTPStatus.NOT_FOUND
-    comment.refresh_from_db()
-    assert comment.text == original['text']
-    assert comment.author_id == original['author_id']
-    assert comment.news_id == original['news_id']
+    saved = Comment.objects.get(pk=comment.pk)
+    assert saved.text == comment.text
+    assert saved.author_id == comment.author_id
+    assert saved.news_id == comment.news_id
+    assert Comment.objects.count() == count_before
